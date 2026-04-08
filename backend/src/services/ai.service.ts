@@ -1,38 +1,37 @@
-import axios from "axios";
+import { groqClient } from "../config/groq";
+import { searchRAG } from "./rag.service";
+import { webSearch } from "./agent.service";
+import { buildPrompt } from "../utils/prompt";
 
-export const generateAIResponse = async (userQuery: string) => {
-  try {
-    const systemPrompt = `
-You are a professional Voice AI Assistant for Inception BD, a software and AI solutions company.
+export const generateAIResponse = async (query: string) => {
+  let context = await searchRAG(query);
 
-Rules:
-- Be professional and concise
-- Answer clearly
-- If info is unknown, give a smart general answer
-- Be helpful and confident
-`;
+  let source = "RAG";
 
-    const response = await axios.post(
-      "https://api.groq.com/openai/v1/chat/completions",
+  // If RAG result is weak → fallback to web
+  if (!context || context.length < 20) {
+    context = await webSearch(query);
+    source = "WEB";
+  }
+
+  const prompt = buildPrompt(context, query);
+
+  const res = await groqClient.post("/chat/completions", {
+    model: "llama3-70b-8192",
+    messages: [
       {
-        model: "llama3-70b-8192",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userQuery },
-        ],
-        temperature: 0.7,
+        role: "system",
+        content: "You are a professional AI assistant.",
       },
       {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+        role: "user",
+        content: prompt,
+      },
+    ],
+  });
 
-    return response.data.choices[0].message.content;
-  } catch (error: any) {
-    console.error(error.response?.data || error.message);
-    return "Sorry, something went wrong.";
-  }
+  return {
+    answer: res.data.choices[0].message.content,
+    source,
+  };
 };
